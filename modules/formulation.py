@@ -10,7 +10,7 @@ import pandas as pd
 from scipy.optimize import linprog
 from pathlib import Path
 
-XLSX_PATH = Path(r"C:\Users\marolinha\Downloads\Formulation Set.xlsx")
+XLSX_PATH = Path(__file__).resolve().parent.parent / "data" / "Formulation Set.xlsx"
 
 # Custos dos ingredientes ($/kg) — fonte: Ingredient Cost.pdf (÷1000 de $/ton)
 CUSTOS_POR_KG = {
