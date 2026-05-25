@@ -200,7 +200,7 @@ def _get_ing():
     return carregar_ingredientes_ativos(), get_ingredient_names()
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=300, show_spinner="⚙ LP HiGHS · formulando dietas…")
 def _mofc(h_n, h_p, h_i, niveis, precos, custos_ing):
     from modules.optimizer import calcular_mofc
     return calcular_mofc(niveis, precos, custos_ingredientes=custos_ing)
@@ -340,18 +340,14 @@ with st.sidebar:
     custos_ing = {10200: p_milho, 22045: p_sj45, 22048: p_sj48,
                   30000: p_oleo,  45050: p_dlmet, 45000: p_llys}
 
-    # ── CALCULAR BUTTON ───────────────────────────────────────────────
-    st.markdown("---")
     st.markdown(f"""
-    <div style="background:#0F172A;border-radius:10px;padding:10px 12px 6px;
-                margin-bottom:4px;font-family:{_FONT};">
-      <div style="font-size:0.60rem;color:#64748B;text-transform:uppercase;
-                  letter-spacing:0.5px;margin-bottom:6px;">Pronto para calcular?</div>
-      <div style="font-size:0.72rem;color:#94A3B8;margin-bottom:8px;line-height:1.4;">
-        Altere qualquer parâmetro acima e pressione o botão para rodar o LP HiGHS.</div>
+    <div style="background:#0F172A;border-radius:10px;padding:8px 12px;margin-top:8px;
+                font-family:{_FONT};">
+      <div style="font-size:0.58rem;color:#4ADE80;font-weight:600;
+                  letter-spacing:0.3px;">● Modo dinâmico ativo</div>
+      <div style="font-size:0.65rem;color:#64748B;margin-top:2px;line-height:1.4;">
+        Resultados atualizam automaticamente a cada alteração.</div>
     </div>""", unsafe_allow_html=True)
-    calcular_btn = st.button("▶  CALCULAR AGORA", type="primary",
-                             use_container_width=True, key="btn_calc_main")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -396,31 +392,10 @@ FASES   = ["starter", "grower", "finisher1", "finisher2"]
 F_LABEL = ["Starter (0-12d)", "Grower (12-24d)", "Finisher 1 (24-36d)", "Finisher 2 (36-45d)"]
 F_SHORT = ["Starter", "Grower", "Fin.1", "Fin.2"]
 
-# ── Session-state: só recalcula quando o botão é pressionado ──────
-_snap_now = {"programa": programa, "precos": precos, "custos_ing": custos_ing}
-_first_run = "resultado" not in st.session_state
-
-if _first_run or calcular_btn:
-    _ph = st.empty()
-    with _ph.container():
-        with st.spinner("⚙ LP HiGHS · formulando 4 fases…"):
-            st.session_state["resultado"]   = _mofc(
-                _hash(programa), _hash(precos), _hash(custos_ing),
-                programa, precos, custos_ing)
-            st.session_state["_snap_saved"] = _snap_now
-    _ph.empty()
-
-resultado = st.session_state["resultado"]
+# ── Cálculo dinâmico — cache por hash, só roda quando inputs mudam ─
+resultado = _mofc(_hash(programa), _hash(precos), _hash(custos_ing),
+                  programa, precos, custos_ing)
 ok        = resultado.get("status") == "OK"
-
-# Stale warning
-if not _first_run and not calcular_btn:
-    _saved = st.session_state.get("_snap_saved", _snap_now)
-    if _snap_now != _saved:
-        st.warning(
-            "⚠ **Parâmetros alterados** — pressione **▶ CALCULAR AGORA** na barra lateral "
-            "para atualizar os resultados com o novo cenário.",
-            icon="⚠")
 
 
 # ══════════════════════════════════════════════════════════════════
