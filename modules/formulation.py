@@ -277,6 +277,7 @@ def formular_dieta(
     }
 
 
-def formular_programa_completo(programa: dict, limites_extra: dict | None = None) -> dict:
-    ing = carregar_ingredientes_ativos()
+def formular_programa_completo(programa: dict, limites_extra: dict | None = None,
+                               custos_ingredientes: dict | None = None) -> dict:
+    ing = carregar_ingredientes_ativos(extras=custos_ingredientes)
     return {fase: formular_dieta(req, ing, limites_extra) for fase, req in programa.items()}

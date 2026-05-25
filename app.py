@@ -200,10 +200,10 @@ def _get_ing():
     return carregar_ingredientes_ativos(), get_ingredient_names()
 
 
-@st.cache_data(ttl=90, show_spinner="Formulando dietas · LP HiGHS…")
-def _mofc(h_n, h_p, niveis, precos):
+@st.cache_data(ttl=300, show_spinner=False)
+def _mofc(h_n, h_p, h_i, niveis, precos, custos_ing):
     from modules.optimizer import calcular_mofc
-    return calcular_mofc(niveis, precos)
+    return calcular_mofc(niveis, precos, custos_ingredientes=custos_ing)
 
 
 @st.cache_data(ttl=300)
@@ -286,17 +286,32 @@ with st.sidebar:
     st.markdown(f'<p style="font-size:0.60rem;font-weight:700;color:#64748B;letter-spacing:0.5px;'
                 f'text-transform:uppercase;margin-bottom:2px;font-family:{_FONT};">Programa Nutricional</p>',
                 unsafe_allow_html=True)
+
+    # — Quick-fill from standard
+    _qf_std = st.selectbox("Preencher com padrão", ["Manual", "Ross 308", "Cobb 500"],
+                           key="qf_std")
+    _STDS_QUICK = {
+        "Ross 308":  {"me": [2975,3050,3100,3150], "lys": [1.350,1.210,1.110,1.040]},
+        "Cobb 500":  {"me": [2950,3050,3100,3150], "lys": [1.320,1.200,1.090,1.010]},
+    }
+    _def_me  = _STDS_QUICK.get(_qf_std, {}).get("me",  [2975,3050,3100,3150])
+    _def_lys = _STDS_QUICK.get(_qf_std, {}).get("lys", [1.320,1.204,1.135,1.063])
+
     ca, cb = st.columns(2)
     with ca:
-        me_s  = st.number_input("ME Strt",  2800, 3400, 2975, 25, key="me_s")
-        me_g  = st.number_input("ME Grow",  2800, 3400, 3050, 25, key="me_g")
-        me_f1 = st.number_input("ME Fin1",  2800, 3400, 3100, 25, key="me_f1")
-        me_f2 = st.number_input("ME Fin2",  2800, 3400, 3150, 25, key="me_f2")
+        st.markdown(f'<p style="font-size:0.58rem;color:#64748B;text-align:center;'
+                    f'margin:0;font-family:{_FONT};">ME (kcal/kg)</p>', unsafe_allow_html=True)
+        me_s  = st.number_input("Starter",   2800, 3400, _def_me[0],  25, key="me_s")
+        me_g  = st.number_input("Grower",    2800, 3400, _def_me[1],  25, key="me_g")
+        me_f1 = st.number_input("Finisher1", 2800, 3400, _def_me[2],  25, key="me_f1")
+        me_f2 = st.number_input("Finisher2", 2800, 3400, _def_me[3],  25, key="me_f2")
     with cb:
-        ly_s  = st.number_input("Lys Strt", 0.80, 1.60, 1.320, 0.005, key="ly_s",  format="%.3f")
-        ly_g  = st.number_input("Lys Grow", 0.80, 1.60, 1.204, 0.005, key="ly_g",  format="%.3f")
-        ly_f1 = st.number_input("Lys Fin1", 0.80, 1.60, 1.135, 0.005, key="ly_f1", format="%.3f")
-        ly_f2 = st.number_input("Lys Fin2", 0.80, 1.60, 1.063, 0.005, key="ly_f2", format="%.3f")
+        st.markdown(f'<p style="font-size:0.58rem;color:#64748B;text-align:center;'
+                    f'margin:0;font-family:{_FONT};">Dig. Lys (%)</p>', unsafe_allow_html=True)
+        ly_s  = st.number_input("Starter ",   0.80, 1.70, _def_lys[0], 0.005, key="ly_s",  format="%.3f")
+        ly_g  = st.number_input("Grower ",    0.80, 1.70, _def_lys[1], 0.005, key="ly_g",  format="%.3f")
+        ly_f1 = st.number_input("Finisher1 ", 0.80, 1.70, _def_lys[2], 0.005, key="ly_f1", format="%.3f")
+        ly_f2 = st.number_input("Finisher2 ", 0.80, 1.70, _def_lys[3], 0.005, key="ly_f2", format="%.3f")
 
     programa = {
         "starter":   {"ame_n": float(me_s),  "dig_lys": float(ly_s)},
@@ -304,7 +319,39 @@ with st.sidebar:
         "finisher1": {"ame_n": float(me_f1), "dig_lys": float(ly_f1)},
         "finisher2": {"ame_n": float(me_f2), "dig_lys": float(ly_f2)},
     }
-    std_sel = st.selectbox("Padrão de referência", ["Nenhum", "Cobb 500", "Ross 308"])
+    std_sel = st.selectbox("Comparar com padrão", ["Nenhum", "Cobb 500", "Ross 308"])
+
+    # ── Preços de ingredientes editáveis ──────────────────────────────
+    st.markdown("---")
+    st.markdown(f'<p style="font-size:0.60rem;font-weight:700;color:#64748B;letter-spacing:0.5px;'
+                f'text-transform:uppercase;margin-bottom:4px;font-family:{_FONT};">'
+                f'Preços de Ingredientes ($/kg)</p>', unsafe_allow_html=True)
+    _ING_DEFAULTS = {10200: 0.320, 22045: 0.350, 22048: 0.411,
+                     30000: 1.050, 45050: 5.700, 45000: 2.400}
+    ic1, ic2 = st.columns(2)
+    with ic1:
+        p_milho   = st.number_input("🌽 Milho",     0.10, 1.00,  _ING_DEFAULTS[10200], 0.005, key="p_milho",  format="%.3f")
+        p_sj48    = st.number_input("🫘 Soja 48%",  0.20, 1.50,  _ING_DEFAULTS[22048], 0.005, key="p_sj48",   format="%.3f")
+        p_oleo    = st.number_input("🛢 Óleo Soja", 0.40, 3.00,  _ING_DEFAULTS[30000], 0.010, key="p_oleo",   format="%.3f")
+    with ic2:
+        p_sj45    = st.number_input("🫘 Soja 45%",  0.20, 1.50,  _ING_DEFAULTS[22045], 0.005, key="p_sj45",   format="%.3f")
+        p_dlmet   = st.number_input("⚗ DL-Met",     2.00, 15.00, _ING_DEFAULTS[45050], 0.100, key="p_dlmet",  format="%.2f")
+        p_llys    = st.number_input("⚗ L-Lis HCl",  0.50, 10.00, _ING_DEFAULTS[45000], 0.100, key="p_llys",   format="%.2f")
+    custos_ing = {10200: p_milho, 22045: p_sj45, 22048: p_sj48,
+                  30000: p_oleo,  45050: p_dlmet, 45000: p_llys}
+
+    # ── CALCULAR BUTTON ───────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown(f"""
+    <div style="background:#0F172A;border-radius:10px;padding:10px 12px 6px;
+                margin-bottom:4px;font-family:{_FONT};">
+      <div style="font-size:0.60rem;color:#64748B;text-transform:uppercase;
+                  letter-spacing:0.5px;margin-bottom:6px;">Pronto para calcular?</div>
+      <div style="font-size:0.72rem;color:#94A3B8;margin-bottom:8px;line-height:1.4;">
+        Altere qualquer parâmetro acima e pressione o botão para rodar o LP HiGHS.</div>
+    </div>""", unsafe_allow_html=True)
+    calcular_btn = st.button("▶  CALCULAR AGORA", type="primary",
+                             use_container_width=True, key="btn_calc_main")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -345,11 +392,35 @@ st.markdown(f"""
 # CÁLCULO PRINCIPAL
 # ══════════════════════════════════════════════════════════════════
 
-resultado = _mofc(_hash(programa), _hash(precos), programa, precos)
-ok        = resultado["status"] == "OK"
-FASES     = ["starter", "grower", "finisher1", "finisher2"]
-F_LABEL   = ["Starter (0-12d)", "Grower (12-24d)", "Finisher 1 (24-36d)", "Finisher 2 (36-45d)"]
-F_SHORT   = ["Starter", "Grower", "Fin.1", "Fin.2"]
+FASES   = ["starter", "grower", "finisher1", "finisher2"]
+F_LABEL = ["Starter (0-12d)", "Grower (12-24d)", "Finisher 1 (24-36d)", "Finisher 2 (36-45d)"]
+F_SHORT = ["Starter", "Grower", "Fin.1", "Fin.2"]
+
+# ── Session-state: só recalcula quando o botão é pressionado ──────
+_snap_now = {"programa": programa, "precos": precos, "custos_ing": custos_ing}
+_first_run = "resultado" not in st.session_state
+
+if _first_run or calcular_btn:
+    _ph = st.empty()
+    with _ph.container():
+        with st.spinner("⚙ LP HiGHS · formulando 4 fases…"):
+            st.session_state["resultado"]   = _mofc(
+                _hash(programa), _hash(precos), _hash(custos_ing),
+                programa, precos, custos_ing)
+            st.session_state["_snap_saved"] = _snap_now
+    _ph.empty()
+
+resultado = st.session_state["resultado"]
+ok        = resultado.get("status") == "OK"
+
+# Stale warning
+if not _first_run and not calcular_btn:
+    _saved = st.session_state.get("_snap_saved", _snap_now)
+    if _snap_now != _saved:
+        st.warning(
+            "⚠ **Parâmetros alterados** — pressione **▶ CALCULAR AGORA** na barra lateral "
+            "para atualizar os resultados com o novo cenário.",
+            icon="⚠")
 
 
 # ══════════════════════════════════════════════════════════════════

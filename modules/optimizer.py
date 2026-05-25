@@ -202,13 +202,16 @@ def custo_producao_total(resultado: dict, custos_extras: dict) -> dict:
 # ── MOFC principal ───────────────────────────────────────────────────────────
 
 def calcular_mofc(niveis_nutri: dict, precos: dict,
-                  cache_formulacao: dict | None = None) -> dict:
+                  cache_formulacao: dict | None = None,
+                  custos_ingredientes: dict | None = None) -> dict:
     """
     MOFC completa: biológico RSM + formulação LP + economics.
     Inclui shadow prices, ratios AA, balanço eletrolítico por fase.
+    custos_ingredientes: overrides de preço {código: $/kg} p/ ingredientes específicos.
     """
     programa = _montar_programa(niveis_nutri)
-    form     = cache_formulacao or formular_programa_completo(programa)
+    form     = cache_formulacao or formular_programa_completo(
+        programa, custos_ingredientes=custos_ingredientes)
 
     erros = [f"{f}: {form[f]['status']}" for f in form if form[f]["status"] != "OK"]
     if erros:
@@ -265,20 +268,19 @@ def calcular_mofc(niveis_nutri: dict, precos: dict,
 
     # Custo por grupo de ingredientes (Energia, Proteína, Minerais, AA sintéticos, Outros)
     from modules.formulation import CUSTOS_POR_KG, get_ingredient_names
+    _custos_ef = {**CUSTOS_POR_KG, **(custos_ingredientes or {})}
     GRUPOS = {
-        "Energia":      [10010, 10100, 10200, 10300, 20000, 23500, 24000, 24015, 30000],
-        "Proteína":     [22045, 22046, 22048, 22560, 25000, 25115, 25150],
-        "Minerais":     [35020, 36000, 37000, 48010],
-        "AA Sint.":     [45000, 45050, 45100, 45250],
-        "Premix/Outros":[40000, 66080, 67001],
+        "Energia":       [10010, 10100, 10200, 10300, 20000, 23500, 24000, 24015, 30000],
+        "Proteína":      [22045, 22046, 22048, 22560, 25000, 25115, 25150],
+        "Minerais":      [35020, 36000, 37000, 48010],
+        "AA Sint.":      [45000, 45050, 45100, 45250],
+        "Premix/Outros": [40000, 66080, 67001],
     }
     custo_grupos_grower = {}
     comp_grower = form.get("grower", {}).get("composicao", {})
-    custo_grower = custo_kg.get("grower", 0)
     for grupo, codigos in GRUPOS.items():
-        pct_grupo = sum(comp_grower.get(c, 0) for c in codigos) / 100
         custo_ing_grupo = sum(
-            (comp_grower.get(c, 0) / 100) * CUSTOS_POR_KG.get(c, 0) for c in codigos
+            (comp_grower.get(c, 0) / 100) * _custos_ef.get(c, 0) for c in codigos
         )
         custo_grupos_grower[grupo] = round(custo_ing_grupo, 5)
 
