@@ -203,13 +203,15 @@ def custo_producao_total(resultado: dict, custos_extras: dict) -> dict:
 
 def calcular_mofc(niveis_nutri: dict, precos: dict,
                   cache_formulacao: dict | None = None,
-                  custos_ingredientes: dict | None = None) -> dict:
+                  custos_ingredientes: dict | None = None,
+                  requisitos_base: dict | None = None) -> dict:
     """
     MOFC completa: biológico RSM + formulação LP + economics.
     Inclui shadow prices, ratios AA, balanço eletrolítico por fase.
     custos_ingredientes: overrides de preço {código: $/kg} p/ ingredientes específicos.
+    requisitos_base: substitui REQUISITOS_FASE_BASE quando fornecido (p/ outros animais).
     """
-    programa = _montar_programa(niveis_nutri)
+    programa = _montar_programa(niveis_nutri, base=requisitos_base)
     form     = cache_formulacao or formular_programa_completo(
         programa, custos_ingredientes=custos_ingredientes)
 
@@ -302,6 +304,70 @@ def calcular_mofc(niveis_nutri: dict, precos: dict,
         "custo_grupos_grower":       custo_grupos_grower,
         "me_ponderado":              round(me_med,  0),
         "lys_ponderada":             round(lys_med, 3),
+    }
+
+
+# ── Formulação LP apenas (sem RSM) — espécies não-broiler ────────────────────
+
+def calcular_form_apenas(niveis_nutri: dict,
+                          custos_ingredientes: dict | None = None,
+                          requisitos_base: dict | None = None) -> dict:
+    """
+    Formulação LP sem predição RSM. Uso para espécies não-broiler (peru, poedeira, etc.).
+    Retorna: status, formulacao, custos_racao_por_kg, ratios_aa, eb_fases, custo_grupos_ref.
+    """
+    from modules.formulation import CUSTOS_POR_KG, get_ingredient_names
+    programa = _montar_programa(niveis_nutri, base=requisitos_base)
+    form     = formular_programa_completo(programa, custos_ingredientes=custos_ingredientes)
+
+    erros = [f"{f}: {form[f]['status']}" for f in form if form[f]["status"] != "OK"]
+    if erros:
+        return {"status": " | ".join(erros), "formulacao": {},
+                "ratios_aa": {}, "eb_fases": {}, "custos_racao_por_kg": {},
+                "custo_grupos_ref": {}}
+
+    _custos_ef = {**CUSTOS_POR_KG, **(custos_ingredientes or {})}
+    GRUPOS = {
+        "Energia":       [10010, 10100, 10200, 10300, 20000, 23500, 24000, 24015, 30000],
+        "Proteína":      [22045, 22046, 22048, 22560, 25000, 25115, 25150],
+        "Minerais":      [35020, 36000, 37000, 48010],
+        "AA Sint.":      [45000, 45050, 45100, 45250],
+        "Premix/Outros": [40000, 66080, 67001],
+    }
+
+    ratios_aa = {}
+    eb_fases  = {}
+    custo_grupos_ref = {}
+
+    first_fase  = next(iter(form))
+    comp_ref    = form.get(first_fase, {}).get("composicao", {})
+    for grupo, codigos in GRUPOS.items():
+        custo_grupos_ref[grupo] = round(
+            sum((comp_ref.get(c, 0) / 100) * _custos_ef.get(c, 0) for c in codigos), 5)
+
+    for fase in form:
+        nuts  = form[fase].get("nutrientes_calculados", {})
+        eb_fases[fase] = calcular_eb(nuts)
+        lys_f = nuts.get("dig_lys", 0)
+        if lys_f > 0:
+            met = nuts.get("dig_met", 0); cys = nuts.get("dig_cys", 0)
+            thr = nuts.get("dig_thr", 0); trp = nuts.get("dig_trp", 0)
+            val = nuts.get("dig_val", 0)
+            ratios_aa[fase] = {
+                "met_pct_lys":    round(met / lys_f * 100, 1),
+                "metcys_pct_lys": round((met + cys) / lys_f * 100, 1),
+                "thr_pct_lys":    round(thr / lys_f * 100, 1),
+                "trp_pct_lys":    round(trp / lys_f * 100, 1),
+                "val_pct_lys":    round(val / lys_f * 100, 1),
+            }
+
+    return {
+        "status":               "OK",
+        "formulacao":           form,
+        "custos_racao_por_kg":  {f: form[f]["custo_por_kg"] for f in form},
+        "ratios_aa":            ratios_aa,
+        "eb_fases":             eb_fases,
+        "custo_grupos_ref":     custo_grupos_ref,
     }
 
 

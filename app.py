@@ -1,11 +1,12 @@
-"""GENESIS OPTIMIZER v6.0 — Sistema Integrado de Otimização Econômica para Frangos de Corte"""
+"""GENESIS OPTIMIZER v7.0 — Plataforma Dinâmica Multi-Espécie · LP HiGHS · RSM Genesis42d_G"""
 
 import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
-import hashlib, json
+import hashlib, json, copy
+from datetime import datetime
 
 st.set_page_config(page_title="Genesis Optimizer", page_icon="🌾",
                    layout="wide", initial_sidebar_state="expanded")
@@ -191,6 +192,93 @@ def _jlay(h=340, title="", extra=None):
 
 
 # ══════════════════════════════════════════════════════════════════
+# BANCO DE ANIMAIS — v7.0
+# ══════════════════════════════════════════════════════════════════
+
+ANIMAIS_PADRAO: dict = {
+    "🐔 Frango de Corte (Broiler)": {
+        "icone": "🐔", "tipo": "broiler", "rsm_disponivel": True,
+        "fases":       ["starter", "grower", "finisher1", "finisher2"],
+        "labels_fase": ["Starter (0-12d)", "Grower (12-24d)", "Finisher 1 (24-36d)", "Finisher 2 (36-45d)"],
+        "short_fase":  ["Starter", "Grower", "Fin.1", "Fin.2"],
+        "prog_padrao": {
+            "starter":   {"ame_n": 2975, "dig_lys": 1.320},
+            "grower":    {"ame_n": 3050, "dig_lys": 1.204},
+            "finisher1": {"ame_n": 3100, "dig_lys": 1.135},
+            "finisher2": {"ame_n": 3150, "dig_lys": 1.063},
+        },
+        "req_base": {
+            "starter":   {"dig_met": 0.697, "dig_cys": 0.306, "dig_thr": 0.884, "dig_trp": 0.239,
+                          "dig_val": 1.003, "ca_total": 0.96, "p_npp": 0.49, "sodium": 0.22, "chloride": 0.28},
+            "grower":    {"dig_met": 0.650, "dig_cys": 0.289, "dig_thr": 0.819, "dig_trp": 0.222,
+                          "dig_val": 0.927, "ca_total": 0.75, "p_npp": 0.43, "sodium": 0.20, "chloride": 0.28},
+            "finisher1": {"dig_met": 0.632, "dig_cys": 0.276, "dig_thr": 0.772, "dig_trp": 0.205,
+                          "dig_val": 0.885, "ca_total": 0.65, "p_npp": 0.37, "sodium": 0.18, "chloride": 0.26},
+            "finisher2": {"dig_met": 0.589, "dig_cys": 0.262, "dig_thr": 0.734, "dig_trp": 0.189,
+                          "dig_val": 0.840, "ca_total": 0.60, "p_npp": 0.33, "sodium": 0.18, "chloride": 0.26},
+        },
+    },
+    "🦃 Peru (Tom Turkey)": {
+        "icone": "🦃", "tipo": "turkey", "rsm_disponivel": False,
+        "fases":       ["starter", "grower", "finisher"],
+        "labels_fase": ["Starter (0-14d)", "Grower (14-35d)", "Finisher (35-84d)"],
+        "short_fase":  ["Starter", "Grower", "Finish"],
+        "prog_padrao": {
+            "starter":  {"ame_n": 2900, "dig_lys": 1.55},
+            "grower":   {"ame_n": 3000, "dig_lys": 1.25},
+            "finisher": {"ame_n": 3050, "dig_lys": 1.00},
+        },
+        "req_base": {
+            "starter":  {"dig_met": 0.63, "dig_cys": 0.26, "dig_thr": 1.02, "dig_trp": 0.28,
+                         "dig_val": 1.12, "ca_total": 1.20, "p_npp": 0.60, "sodium": 0.18, "chloride": 0.23},
+            "grower":   {"dig_met": 0.52, "dig_cys": 0.23, "dig_thr": 0.83, "dig_trp": 0.23,
+                         "dig_val": 0.92, "ca_total": 0.85, "p_npp": 0.45, "sodium": 0.16, "chloride": 0.22},
+            "finisher": {"dig_met": 0.41, "dig_cys": 0.20, "dig_thr": 0.67, "dig_trp": 0.18,
+                         "dig_val": 0.74, "ca_total": 0.65, "p_npp": 0.35, "sodium": 0.15, "chloride": 0.20},
+        },
+    },
+    "🥚 Poedeira Leve": {
+        "icone": "🥚", "tipo": "layer", "rsm_disponivel": False,
+        "fases":       ["cria", "recria", "producao"],
+        "labels_fase": ["Cria (0-42d)", "Recria (42-70d)", "Produção (70d+)"],
+        "short_fase":  ["Cria", "Recria", "Prod."],
+        "prog_padrao": {
+            "cria":     {"ame_n": 2900, "dig_lys": 1.05},
+            "recria":   {"ame_n": 2700, "dig_lys": 0.80},
+            "producao": {"ame_n": 2750, "dig_lys": 0.80},
+        },
+        "req_base": {
+            "cria":     {"dig_met": 0.43, "dig_cys": 0.38, "dig_thr": 0.70, "dig_trp": 0.19,
+                         "dig_val": 0.85, "ca_total": 1.00, "p_npp": 0.45, "sodium": 0.18, "chloride": 0.22},
+            "recria":   {"dig_met": 0.34, "dig_cys": 0.30, "dig_thr": 0.54, "dig_trp": 0.15,
+                         "dig_val": 0.65, "ca_total": 0.90, "p_npp": 0.38, "sodium": 0.16, "chloride": 0.20},
+            "producao": {"dig_met": 0.43, "dig_cys": 0.36, "dig_thr": 0.54, "dig_trp": 0.16,
+                         "dig_val": 0.67, "ca_total": 1.00, "p_npp": 0.35, "sodium": 0.17, "chloride": 0.21},
+        },
+    },
+}
+
+# ══════════════════════════════════════════════════════════════════
+# SESSION STATE — inicialização única por sessão
+# ══════════════════════════════════════════════════════════════════
+
+if "animais_db" not in st.session_state:
+    st.session_state.animais_db = copy.deepcopy(ANIMAIS_PADRAO)
+
+if "cenarios_db" not in st.session_state:
+    st.session_state.cenarios_db = {}   # {nome: {animal, programa, custos_ing, salvo_em}}
+
+# Preços de ingredientes — init com defaults de formulation.py
+try:
+    from modules.formulation import CUSTOS_POR_KG as _DEF_P
+    for _c, _dp in _DEF_P.items():
+        if f"cfg_p_{_c}" not in st.session_state:
+            st.session_state[f"cfg_p_{_c}"] = _dp
+except Exception:
+    pass
+
+
+# ══════════════════════════════════════════════════════════════════
 # CACHE
 # ══════════════════════════════════════════════════════════════════
 
@@ -201,9 +289,13 @@ def _get_ing():
 
 
 @st.cache_data(ttl=300, show_spinner="⚙ LP HiGHS · formulando dietas…")
-def _mofc(h_n, h_p, h_i, niveis, precos, custos_ing):
-    from modules.optimizer import calcular_mofc
-    return calcular_mofc(niveis, precos, custos_ingredientes=custos_ing)
+def _mofc(h_n, h_p, h_i, h_r, niveis, precos, custos_ing, req_base, is_broiler):
+    if is_broiler:
+        from modules.optimizer import calcular_mofc
+        return calcular_mofc(niveis, precos, custos_ingredientes=custos_ing, requisitos_base=req_base)
+    else:
+        from modules.optimizer import calcular_form_apenas
+        return calcular_form_apenas(niveis, custos_ingredientes=custos_ing, requisitos_base=req_base)
 
 
 @st.cache_data(ttl=300)
@@ -229,26 +321,53 @@ def _crescimento(me, lys, age):
 # ══════════════════════════════════════════════════════════════════
 
 with st.sidebar:
+    # ── Logo ────────────────────────────────────────────────────────
     st.markdown(f"""
-    <div style="border-bottom:1px solid #1E293B;padding-bottom:16px;margin-bottom:16px;font-family:{_FONT};">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+    <div style="border-bottom:1px solid #1E293B;padding-bottom:14px;margin-bottom:14px;font-family:{_FONT};">
+      <div style="display:flex;align-items:center;gap:10px;">
         <div style="width:34px;height:34px;background:#2563EB;border-radius:9px;
                     display:flex;align-items:center;justify-content:center;font-size:1rem;
                     box-shadow:0 3px 8px rgba(37,99,235,0.40);">🌾</div>
         <div>
           <div style="font-size:1.02rem;font-weight:800;color:#F1F5F9;letter-spacing:-0.3px;">Genesis</div>
-          <div style="font-size:0.58rem;color:#475569;letter-spacing:0.3px;">Optimizer v6.0</div>
+          <div style="font-size:0.58rem;color:#475569;letter-spacing:0.3px;">Optimizer v7.0 · Multi-Espécie</div>
         </div>
       </div>
     </div>""", unsafe_allow_html=True)
 
+    # ── Seletor de animal ────────────────────────────────────────────
+    st.markdown(f'<p style="font-size:0.60rem;font-weight:700;color:#64748B;letter-spacing:0.5px;'
+                f'text-transform:uppercase;margin-bottom:2px;font-family:{_FONT};">'
+                f'Espécie / Animal</p>', unsafe_allow_html=True)
+    _anim_list  = list(st.session_state.animais_db.keys())
+    animal_nome = st.selectbox("", _anim_list, key="animal_sel",
+                               label_visibility="collapsed")
+    animal_cfg  = st.session_state.animais_db[animal_nome]
+    is_broiler  = animal_cfg.get("tipo") == "broiler"
+
+    # Reset nutritional inputs when animal changes
+    _prev_anim = st.session_state.get("_prev_anim_name")
+    if _prev_anim != animal_nome:
+        for _fase, _v in animal_cfg.get("prog_padrao", {}).items():
+            st.session_state[f"me_{_fase}"]  = _v.get("ame_n",  3000)
+            st.session_state[f"ly_{_fase}"]  = _v.get("dig_lys", 1.10)
+        st.session_state["_prev_anim_name"] = animal_nome
+        st.session_state["_prev_qf_std"]    = "Manual"
+
+    FASES   = animal_cfg["fases"]
+    F_LABEL = animal_cfg["labels_fase"]
+    F_SHORT = animal_cfg["short_fase"]
+    req_base = st.session_state.animais_db[animal_nome].get("req_base", {})
+
+    # ── Preços de venda ──────────────────────────────────────────────
+    st.markdown("---")
     st.markdown(f'<p style="font-size:0.60rem;font-weight:700;color:#64748B;letter-spacing:0.5px;'
                 f'text-transform:uppercase;margin-bottom:2px;font-family:{_FONT};">'
                 f'Preços de Venda ($/kg)</p>', unsafe_allow_html=True)
-    p_vivo   = st.slider("Frango Vivo",     0.50, 2.50, 1.00, 0.01, format="$%.2f")
-    p_car    = st.slider("Carcaça WOG",     0.50, 3.00, 2.20, 0.01, format="$%.2f")
-    p_peito  = st.slider("Peito Desossado", 1.50, 6.00, 4.50, 0.05, format="$%.2f")
-    p_cortes = st.slider("Cortes Diversos", 0.50, 2.50, 1.10, 0.05, format="$%.2f")
+    p_vivo   = st.slider("Frango Vivo / Ave Viva", 0.50, 2.50, 1.00, 0.01, format="$%.2f", key="sl_pvivo")
+    p_car    = st.slider("Carcaça WOG",             0.50, 3.00, 2.20, 0.01, format="$%.2f", key="sl_pcar")
+    p_peito  = st.slider("Peito Desossado",          1.50, 6.00, 4.50, 0.05, format="$%.2f", key="sl_ppeito")
+    p_cortes = st.slider("Cortes / Outros",          0.50, 2.50, 1.10, 0.05, format="$%.2f", key="sl_pcortes")
     precos   = {"frango_vivo": p_vivo, "carcaca": p_car,
                 "peito_desossado": p_peito, "cortes_misc": p_cortes}
 
@@ -257,96 +376,106 @@ with st.sidebar:
                 f'text-transform:uppercase;margin-bottom:2px;font-family:{_FONT};">Cenário Primário</p>',
                 unsafe_allow_html=True)
     cenario = st.radio("", ["vivo", "carcaca", "desossado"],
-        format_func=lambda x: {"vivo": "Frango Vivo",
-                                "carcaca": "Carcaça WOG",
-                                "desossado": "Peito Desossado"}[x], index=2)
+        format_func=lambda x: {"vivo":"Ave Viva","carcaca":"Carcaça WOG","desossado":"Peito Desossado"}[x],
+        index=2, key="sl_cenario")
 
+    # ── Frota & Produção ─────────────────────────────────────────────
     st.markdown("---")
     st.markdown(f'<p style="font-size:0.60rem;font-weight:700;color:#64748B;letter-spacing:0.5px;'
                 f'text-transform:uppercase;margin-bottom:2px;font-family:{_FONT};">Frota & Produção</p>',
                 unsafe_allow_html=True)
-    n_aves   = st.number_input("Aves alojadas",   10_000, 2_000_000, 100_000, 10_000)
-    mort_pct = st.slider("Mortalidade (%)", 0.5, 10.0, 3.0, 0.5)
-    idade_d  = st.slider("Idade de abate (dias)", 35, 56, 45)
+    n_aves   = st.number_input("Aves/Lote alojadas",  10_000, 2_000_000, 100_000, 10_000, key="ni_naves")
+    mort_pct = st.slider("Mortalidade (%)",  0.5, 10.0, 3.0, 0.5, key="sl_mort")
+    idade_d  = st.slider("Idade de abate (dias)", 35, 56, 45, key="sl_idade")
 
+    # ── Custos extras ────────────────────────────────────────────────
     st.markdown("---")
     st.markdown(f'<p style="font-size:0.60rem;font-weight:700;color:#64748B;letter-spacing:0.5px;'
                 f'text-transform:uppercase;margin-bottom:2px;font-family:{_FONT};">Custos Extras ($/ave)</p>',
                 unsafe_allow_html=True)
-    c_pinto = st.number_input("Pinto 1d",     0.10, 2.00, 0.45, 0.05, format="%.2f")
-    c_med   = st.number_input("Medicação",    0.01, 0.30, 0.05, 0.01, format="%.2f")
-    c_ener  = st.number_input("Energia",      0.01, 0.20, 0.04, 0.01, format="%.2f")
-    c_mo    = st.number_input("Mão de obra",  0.02, 0.30, 0.07, 0.01, format="%.2f")
-    c_depr  = st.number_input("Depreciação",  0.02, 0.30, 0.10, 0.01, format="%.2f")
-    c_out   = st.number_input("Outros",       0.01, 0.20, 0.04, 0.01, format="%.2f")
+    c_pinto = st.number_input("Pinto/Pulmão 1d", 0.10, 2.00, 0.45, 0.05, format="%.2f", key="ni_pinto")
+    c_med   = st.number_input("Medicação",        0.01, 0.30, 0.05, 0.01, format="%.2f", key="ni_med")
+    c_ener  = st.number_input("Energia",          0.01, 0.20, 0.04, 0.01, format="%.2f", key="ni_ener")
+    c_mo    = st.number_input("Mão de obra",      0.02, 0.30, 0.07, 0.01, format="%.2f", key="ni_mo")
+    c_depr  = st.number_input("Depreciação",      0.02, 0.30, 0.10, 0.01, format="%.2f", key="ni_depr")
+    c_out   = st.number_input("Outros",           0.01, 0.20, 0.04, 0.01, format="%.2f", key="ni_out")
     custos_extras = {"pinto": c_pinto, "medicacao": c_med, "energia": c_ener,
                      "mao_obra": c_mo, "depreciacao": c_depr, "outros": c_out}
 
+    # ── Programa Nutricional — dinâmico por animal ────────────────────
     st.markdown("---")
     st.markdown(f'<p style="font-size:0.60rem;font-weight:700;color:#64748B;letter-spacing:0.5px;'
-                f'text-transform:uppercase;margin-bottom:2px;font-family:{_FONT};">Programa Nutricional</p>',
-                unsafe_allow_html=True)
+                f'text-transform:uppercase;margin-bottom:2px;font-family:{_FONT};">'
+                f'Programa Nutricional · {animal_cfg["icone"]}</p>', unsafe_allow_html=True)
 
-    # — Quick-fill from standard
-    _qf_std = st.selectbox("Preencher com padrão", ["Manual", "Ross 308", "Cobb 500"],
-                           key="qf_std")
-    _STDS_QUICK = {
-        "Ross 308":  {"me": [2975,3050,3100,3150], "lys": [1.350,1.210,1.110,1.040]},
-        "Cobb 500":  {"me": [2950,3050,3100,3150], "lys": [1.320,1.200,1.090,1.010]},
-    }
-    _def_me  = _STDS_QUICK.get(_qf_std, {}).get("me",  [2975,3050,3100,3150])
-    _def_lys = _STDS_QUICK.get(_qf_std, {}).get("lys", [1.320,1.204,1.135,1.063])
+    # Quick-fill (broiler only)
+    if is_broiler:
+        _qf_std = st.selectbox("Preencher com padrão",
+                               ["Manual", "Ross 308", "Cobb 500"], key="qf_std")
+        _STDS_QUICK = {
+            "Ross 308": {"me": [2975,3050,3100,3150], "lys": [1.350,1.210,1.110,1.040]},
+            "Cobb 500": {"me": [2950,3050,3100,3150], "lys": [1.320,1.200,1.090,1.010]},
+        }
+        _prev_std = st.session_state.get("_prev_qf_std", "Manual")
+        if _qf_std != "Manual" and _qf_std != _prev_std:
+            _sd = _STDS_QUICK[_qf_std]
+            for _i, _f in enumerate(FASES):
+                if _i < len(_sd["me"]):
+                    st.session_state[f"me_{_f}"] = _sd["me"][_i]
+                    st.session_state[f"ly_{_f}"] = _sd["lys"][_i]
+            st.session_state["_prev_qf_std"] = _qf_std
+        elif _qf_std == "Manual":
+            st.session_state["_prev_qf_std"] = "Manual"
+    else:
+        _qf_std = "Manual"
 
-    ca, cb = st.columns(2)
-    with ca:
-        st.markdown(f'<p style="font-size:0.58rem;color:#64748B;text-align:center;'
-                    f'margin:0;font-family:{_FONT};">ME (kcal/kg)</p>', unsafe_allow_html=True)
-        me_s  = st.number_input("Starter",   2800, 3400, _def_me[0],  25, key="me_s")
-        me_g  = st.number_input("Grower",    2800, 3400, _def_me[1],  25, key="me_g")
-        me_f1 = st.number_input("Finisher1", 2800, 3400, _def_me[2],  25, key="me_f1")
-        me_f2 = st.number_input("Finisher2", 2800, 3400, _def_me[3],  25, key="me_f2")
-    with cb:
-        st.markdown(f'<p style="font-size:0.58rem;color:#64748B;text-align:center;'
-                    f'margin:0;font-family:{_FONT};">Dig. Lys (%)</p>', unsafe_allow_html=True)
-        ly_s  = st.number_input("Starter ",   0.80, 1.70, _def_lys[0], 0.005, key="ly_s",  format="%.3f")
-        ly_g  = st.number_input("Grower ",    0.80, 1.70, _def_lys[1], 0.005, key="ly_g",  format="%.3f")
-        ly_f1 = st.number_input("Finisher1 ", 0.80, 1.70, _def_lys[2], 0.005, key="ly_f1", format="%.3f")
-        ly_f2 = st.number_input("Finisher2 ", 0.80, 1.70, _def_lys[3], 0.005, key="ly_f2", format="%.3f")
+    # Inputs ME + Lys por fase
+    programa = {}
+    for _i, _fase in enumerate(FASES):
+        _prog_def = animal_cfg["prog_padrao"].get(_fase, {"ame_n": 3000, "dig_lys": 1.10})
+        _lbl = F_SHORT[_i]
+        _ca, _cb = st.columns(2)
+        _me = _ca.number_input(
+            f"ME {_lbl}", 2400, 3600, _prog_def["ame_n"], 25,
+            key=f"me_{_fase}", label_visibility="visible")
+        _ly = _cb.number_input(
+            f"Lys {_lbl}", 0.50, 2.00, _prog_def["dig_lys"], 0.005,
+            format="%.3f", key=f"ly_{_fase}", label_visibility="visible")
+        programa[_fase] = {"ame_n": float(_me), "dig_lys": float(_ly)}
 
-    programa = {
-        "starter":   {"ame_n": float(me_s),  "dig_lys": float(ly_s)},
-        "grower":    {"ame_n": float(me_g),  "dig_lys": float(ly_g)},
-        "finisher1": {"ame_n": float(me_f1), "dig_lys": float(ly_f1)},
-        "finisher2": {"ame_n": float(me_f2), "dig_lys": float(ly_f2)},
-    }
-    std_sel = st.selectbox("Comparar com padrão", ["Nenhum", "Cobb 500", "Ross 308"])
+    std_sel = st.selectbox("Comparar com padrão",
+                           ["Nenhum", "Cobb 500", "Ross 308"]) if is_broiler else "Nenhum"
 
-    # ── Preços de ingredientes editáveis ──────────────────────────────
+    # ── Preços de ingredientes — resumo (edição em ⚙ Configurações) ──
     st.markdown("---")
-    st.markdown(f'<p style="font-size:0.60rem;font-weight:700;color:#64748B;letter-spacing:0.5px;'
-                f'text-transform:uppercase;margin-bottom:4px;font-family:{_FONT};">'
-                f'Preços de Ingredientes ($/kg)</p>', unsafe_allow_html=True)
-    _ING_DEFAULTS = {10200: 0.320, 22045: 0.350, 22048: 0.411,
-                     30000: 1.050, 45050: 5.700, 45000: 2.400}
-    ic1, ic2 = st.columns(2)
-    with ic1:
-        p_milho   = st.number_input("🌽 Milho",     0.10, 1.00,  _ING_DEFAULTS[10200], 0.005, key="p_milho",  format="%.3f")
-        p_sj48    = st.number_input("🫘 Soja 48%",  0.20, 1.50,  _ING_DEFAULTS[22048], 0.005, key="p_sj48",   format="%.3f")
-        p_oleo    = st.number_input("🛢 Óleo Soja", 0.40, 3.00,  _ING_DEFAULTS[30000], 0.010, key="p_oleo",   format="%.3f")
-    with ic2:
-        p_sj45    = st.number_input("🫘 Soja 45%",  0.20, 1.50,  _ING_DEFAULTS[22045], 0.005, key="p_sj45",   format="%.3f")
-        p_dlmet   = st.number_input("⚗ DL-Met",     2.00, 15.00, _ING_DEFAULTS[45050], 0.100, key="p_dlmet",  format="%.2f")
-        p_llys    = st.number_input("⚗ L-Lis HCl",  0.50, 10.00, _ING_DEFAULTS[45000], 0.100, key="p_llys",   format="%.2f")
-    custos_ing = {10200: p_milho, 22045: p_sj45, 22048: p_sj48,
-                  30000: p_oleo,  45050: p_dlmet, 45000: p_llys}
+    from modules.formulation import CUSTOS_POR_KG as _CKG
+    custos_ing = {c: float(st.session_state.get(f"cfg_p_{c}", _CKG.get(c, 0)))
+                  for c in _CKG}
+    _key_prices = {10200:"🌽 Milho", 22045:"🫘 Soja 45%", 22048:"🫘 Soja 48%",
+                   30000:"🛢 Óleo",  45050:"⚗ DL-Met",   45000:"⚗ L-Lis"}
+    _price_rows = "".join(
+        f'<div style="display:flex;justify-content:space-between;padding:2px 0;">'
+        f'<span style="font-size:0.62rem;color:#94A3B8;">{v}</span>'
+        f'<span style="font-size:0.62rem;color:#E2E8F0;font-weight:600;">'
+        f'${custos_ing.get(k, 0):.3f}</span></div>'
+        for k, v in _key_prices.items())
+    st.markdown(f"""
+    <div style="background:#0F172A;border:1px solid #1E293B;border-radius:10px;
+                padding:10px 12px;font-family:{_FONT};">
+      <div style="font-size:0.52rem;font-weight:700;color:#64748B;letter-spacing:0.4px;
+                  text-transform:uppercase;margin-bottom:6px;">Preços Atuais ($/kg)</div>
+      {_price_rows}
+      <div style="font-size:0.58rem;color:#3B82F6;margin-top:8px;border-top:1px solid #1E293B;
+                  padding-top:6px;">→ Editar todos em <b>⚙ Configurações</b></div>
+    </div>""", unsafe_allow_html=True)
 
     st.markdown(f"""
     <div style="background:#0F172A;border-radius:10px;padding:8px 12px;margin-top:8px;
                 font-family:{_FONT};">
-      <div style="font-size:0.58rem;color:#4ADE80;font-weight:600;
-                  letter-spacing:0.3px;">● Modo dinâmico ativo</div>
+      <div style="font-size:0.58rem;color:#4ADE80;font-weight:600;letter-spacing:0.3px;">
+        ● Modo dinâmico ativo</div>
       <div style="font-size:0.65rem;color:#64748B;margin-top:2px;line-height:1.4;">
-        Resultados atualizam automaticamente a cada alteração.</div>
+        Resultados atualizam a cada alteração. Preços de ingredientes em ⚙ Configurações.</div>
     </div>""", unsafe_allow_html=True)
 
 
@@ -371,7 +500,7 @@ st.markdown(f"""
                     line-height:1.2;">Genesis Optimizer</div>
         <div style="font-size:0.62rem;color:#64748B;margin-top:2px;letter-spacing:0.3px;">
           RSM Genesis42d_G &nbsp;·&nbsp; LP HiGHS &nbsp;·&nbsp;
-          MOFC Multi-Cenário &nbsp;·&nbsp; v6.0</div>
+          MOFC Multi-Cenário &nbsp;·&nbsp; v7.0 · Multi-Espécie</div>
       </div>
     </div>
     <div style="display:flex;align-items:center;gap:12px;">
@@ -388,14 +517,13 @@ st.markdown(f"""
 # CÁLCULO PRINCIPAL
 # ══════════════════════════════════════════════════════════════════
 
-FASES   = ["starter", "grower", "finisher1", "finisher2"]
-F_LABEL = ["Starter (0-12d)", "Grower (12-24d)", "Finisher 1 (24-36d)", "Finisher 2 (36-45d)"]
-F_SHORT = ["Starter", "Grower", "Fin.1", "Fin.2"]
+# FASES, F_LABEL, F_SHORT, req_base já definidos no sidebar acima (dinâmicos por animal)
 
-# ── Cálculo dinâmico — cache por hash, só roda quando inputs mudam ─
-resultado = _mofc(_hash(programa), _hash(precos), _hash(custos_ing),
-                  programa, precos, custos_ing)
-ok        = resultado.get("status") == "OK"
+# ── Cálculo dinâmico — cache por hash; LP só roda quando inputs mudam ──
+resultado = _mofc(
+    _hash(programa), _hash(precos), _hash(custos_ing), _hash(req_base),
+    programa, precos, custos_ing, req_base, is_broiler)
+ok = resultado.get("status") == "OK"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -403,8 +531,23 @@ ok        = resultado.get("status") == "OK"
 # ══════════════════════════════════════════════════════════════════
 
 tabs = st.tabs(["Overview", "Formulação LP", "Produção", "Otimizador",
-                "RSM · Crescimento", "Sensibilidade"])
-T_OVR, T_FORM, T_PROD, T_OPT, T_RSM, T_SENS = tabs
+                "RSM · Crescimento", "Sensibilidade", "⚙ Configurações"])
+T_OVR, T_FORM, T_PROD, T_OPT, T_RSM, T_SENS, T_CONF = tabs
+
+# Helper para mostrar aviso de espécie não-broiler
+def _aviso_especie(nome_tab: str):
+    st.markdown(f"""
+    <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:14px;
+                padding:40px 30px;text-align:center;font-family:{_FONT};margin:20px 0;">
+      <div style="font-size:2rem;margin-bottom:12px;">{animal_cfg['icone']}</div>
+      <div style="font-size:1rem;font-weight:700;color:#1E293B;margin-bottom:8px;">
+        {nome_tab} — Disponível para Frango de Corte (Broiler)</div>
+      <div style="font-size:0.82rem;color:#64748B;max-width:480px;margin:0 auto;line-height:1.6;">
+        O modelo RSM Genesis42d_G foi calibrado exclusivamente para frangos de corte.
+        Para <b>{animal_nome}</b>, utilize a aba <b>Formulação LP</b> que funciona
+        para todas as espécies.
+      </div>
+    </div>""", unsafe_allow_html=True)
 
 
 # ┌──────────────────────────────────────────────────────────────┐
@@ -413,6 +556,31 @@ T_OVR, T_FORM, T_PROD, T_OPT, T_RSM, T_SENS = tabs
 with T_OVR:
     if not ok:
         st.error(f"Formulação impossível: {resultado['status']}")
+    elif not is_broiler:
+        # ── Overview simplificado para não-broiler ─────────────────
+        section(f"Custo de Ração por Fase · {animal_nome}",
+                "LP HiGHS · formulação de mínimo custo")
+        form_nb = resultado.get("formulacao", {})
+        _nb_cols = st.columns(len(FASES))
+        for _i, _f in enumerate(FASES):
+            _ckg = form_nb.get(_f, {}).get("custo_por_kg", 0) or 0
+            card(_nb_cols[_i], f"${_ckg:.4f}/kg", F_LABEL[_i], "blue" if _i%2==0 else "teal",
+                 sub=f"{len(form_nb.get(_f,{}).get('composicao',{}))} ingredientes")
+        divider()
+        section("Perfil Nutricional por Fase", "calculado pela formulação LP")
+        from modules.optimizer import REQUISITOS_FASE_BASE
+        NUT_LBL_NB = {"ame_n":"ME (kcal/kg)","dig_lys":"Dig.Lisina (%)","dig_met":"Dig.Met (%)",
+                      "ca_total":"Cálcio (%)","p_npp":"P-NPP (%)","sodium":"Sódio (%)"}
+        _nb_rows = []
+        for _nut, _lbl in NUT_LBL_NB.items():
+            _row = {"Nutriente": _lbl}
+            for _f, _fs in zip(FASES, F_SHORT):
+                _calc = form_nb.get(_f, {}).get("nutrientes_calculados", {}).get(_nut)
+                _row[_fs] = f"{_calc:.4f}" if _calc is not None else "—"
+            _nb_rows.append(_row)
+        st.dataframe(pd.DataFrame(_nb_rows).set_index("Nutriente"), use_container_width=True)
+        st.info("Análise econômica completa (MOFC, EPEF, Frota) disponível para Frango de Corte. "
+                "Consulte a aba **Formulação LP** para detalhes das rações.")
     else:
         from modules.optimizer import calcular_epef, custo_producao_total, escalas_frota
 
@@ -975,6 +1143,8 @@ with T_FORM:
 with T_PROD:
     if not ok:
         st.error(resultado["status"])
+    elif not is_broiler:
+        _aviso_especie("Produção / Zootecnia")
     else:
         from modules.optimizer import (calcular_epef, custo_producao_total,
                                        escalas_frota, break_even_preco,
@@ -1149,9 +1319,12 @@ with T_PROD:
 # │  ABA 4 · OTIMIZADOR                                          │
 # └──────────────────────────────────────────────────────────────┘
 with T_OPT:
-    section("Otimizador de Programa Nutricional",
-            "busca grid ME × Lisina · maximiza MOFC por LP")
-    oa, ob, oc = st.columns(3)
+    if not is_broiler:
+        _aviso_especie("Otimizador")
+    else:
+     section("Otimizador de Programa Nutricional",
+             "busca grid ME × Lisina · maximiza MOFC por LP")
+     oa, ob, oc = st.columns(3)
     with oa:
         me_min_o = st.number_input("ME mín.",  2700, 3200, 2900, 25)
         me_max_o = st.number_input("ME máx.",  3000, 3500, 3300, 25)
@@ -1239,10 +1412,13 @@ with T_OPT:
 # │  ABA 5 · RSM + CRESCIMENTO                                   │
 # └──────────────────────────────────────────────────────────────┘
 with T_RSM:
-    from modules.biological import MODEL_STATS, otimo_biologico
+    if not is_broiler:
+        _aviso_especie("RSM · Crescimento")
+    else:
+     from modules.biological import MODEL_STATS, otimo_biologico
 
-    # ── 4 model stat cards
-    section("Modelos RSM", "Genesis42d_G · regressão quadrática OLS · n=24 pontos")
+     # ── 4 model stat cards
+     section("Modelos RSM", "Genesis42d_G · regressão quadrática OLS · n=24 pontos")
     ms_cols = st.columns(4)
     for idx, (var, lbl, cor_ms) in enumerate([
         ("peso_vivo_kg", "Peso Vivo", "blue"),
@@ -1628,3 +1804,368 @@ with T_SENS:
             st.plotly_chart(fig_pv, use_container_width=True, config=_CFG)
         else:
             st.info("Selecione a variável e clique em Calcular.")
+
+
+# ┌──────────────────────────────────────────────────────────────┐
+# │  ABA 7 · CONFIGURAÇÕES  v7.0                                 │
+# └──────────────────────────────────────────────────────────────┘
+with T_CONF:
+    from modules.formulation import CUSTOS_POR_KG as _CKGC, get_ingredient_names as _gin
+
+    _conf_tabs = st.tabs(["📦 Ingredientes", "🐾 Animais", "💾 Cenários"])
+
+    # ═══════════════════════════════════════════════════════════
+    # SUB-TAB 1 · INGREDIENTES
+    # ═══════════════════════════════════════════════════════════
+    with _conf_tabs[0]:
+        section("Editor de Preços de Ingredientes",
+                "todos os ingredientes da matrix nutricional · $/kg")
+        st.markdown(f"""
+        <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;
+                    padding:10px 16px;margin-bottom:16px;font-family:{_FONT};
+                    font-size:0.78rem;color:#1E40AF;">
+          💡 Edite os preços abaixo. As alterações são aplicadas imediatamente ao cálculo em
+          todas as abas. Os valores padrão baseiam-se no arquivo
+          <b>Ingredient Cost.pdf</b> (base maio/2025).
+        </div>""", unsafe_allow_html=True)
+
+        _ing_names_c = _gin()
+
+        _GRUPOS_ING = {
+            "🌽 Cereais & Energia":  [10010, 10100, 10200, 10300, 23500, 24000, 24015, 30000],
+            "🫘 Proteínas":          [20000, 22045, 22046, 22048, 22560, 25000, 25115, 25150],
+            "⛏ Minerais":           [35020, 36000, 37000, 48010],
+            "⚗ Aminoácidos Sint.":  [45000, 45050, 45100, 45250],
+            "🧪 Premix & Aditivos": [40000, 66080, 67001],
+        }
+
+        for _grp_nome, _grp_codes in _GRUPOS_ING.items():
+            section(_grp_nome)
+            _valid = [c for c in _grp_codes if c in _CKGC]
+            _gcols = st.columns(3)
+            for _gi, _gc in enumerate(_valid):
+                _gname  = _ing_names_c.get(_gc, f"Ingr. {_gc}")[:28]
+                _gdef   = _CKGC[_gc]
+                _gcur   = float(st.session_state.get(f"cfg_p_{_gc}", _gdef))
+                _gstep  = 0.001 if _gdef < 1.0 else (0.01 if _gdef < 10 else 0.10)
+                _gfmt   = "%.3f" if _gdef < 1.0 else ("%.2f" if _gdef < 10 else "%.1f")
+                _new_v  = _gcols[_gi % 3].number_input(
+                    f"{_gname}",
+                    min_value=0.001, max_value=500.0,
+                    value=_gcur, step=_gstep, format=_gfmt,
+                    help=f"Código {_gc} · Padrão: ${_gdef:.3f}/kg",
+                    key=f"cfg_p_{_gc}")
+
+        divider()
+        _rc1, _rc2 = st.columns([1, 4])
+        with _rc1:
+            if st.button("🔄 Restaurar Padrões", use_container_width=True):
+                for _c2, _dp2 in _CKGC.items():
+                    st.session_state[f"cfg_p_{_c2}"] = _dp2
+                st.success("✓ Todos os preços restaurados para os valores padrão!")
+                st.rerun()
+        with _rc2:
+            # Show summary of changes vs default
+            _changed = {c: float(st.session_state.get(f"cfg_p_{c}", _CKGC[c]))
+                        for c in _CKGC
+                        if abs(float(st.session_state.get(f"cfg_p_{c}", _CKGC[c])) - _CKGC[c]) > 0.0001}
+            if _changed:
+                _chg_rows = [{"Ingrediente": _ing_names_c.get(c, str(c))[:28],
+                               "Código": c,
+                               "Padrão": f"${_CKGC[c]:.3f}",
+                               "Atual":  f"${v:.3f}",
+                               "Δ":      f"{(v-_CKGC[c]):+.3f}"}
+                             for c, v in _changed.items()]
+                st.markdown("**Preços alterados em relação ao padrão:**")
+                st.dataframe(pd.DataFrame(_chg_rows).set_index("Ingrediente"),
+                             use_container_width=True, hide_index=False)
+            else:
+                st.info("Nenhum preço alterado — todos no valor padrão.")
+
+    # ═══════════════════════════════════════════════════════════
+    # SUB-TAB 2 · ANIMAIS
+    # ═══════════════════════════════════════════════════════════
+    with _conf_tabs[1]:
+        _aconf_tabs = st.tabs(["✏️ Editar Animal", "➕ Adicionar Animal"])
+
+        # ── Editar animal existente ────────────────────────────
+        with _aconf_tabs[0]:
+            section("Editar Perfil de Animal",
+                    "requisitos nutricionais por fase · programa padrão")
+
+            _edit_anim = st.selectbox(
+                "Selecionar animal para editar",
+                list(st.session_state.animais_db.keys()),
+                key="conf_edit_anim")
+            _ea_cfg = st.session_state.animais_db[_edit_anim]
+            _is_default = _edit_anim in ANIMAIS_PADRAO
+
+            st.markdown(f"""
+            <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;
+                        padding:10px 16px;margin-bottom:12px;font-family:{_FONT};">
+              <span style="font-size:1.2rem;">{_ea_cfg['icone']}</span>
+              <span style="font-size:0.78rem;color:#374151;margin-left:8px;">
+                <b>{_edit_anim}</b> · Tipo: <code>{_ea_cfg['tipo']}</code> ·
+                Fases: {len(_ea_cfg['fases'])} ·
+                RSM: {'Disponível' if _ea_cfg['rsm_disponivel'] else 'N/D'}
+              </span>
+            </div>""", unsafe_allow_html=True)
+
+            _NUT_EDIT_LBL = {
+                "dig_met": "Dig.Met (%)", "dig_cys": "Dig.Cis (%)", "dig_thr": "Dig.Treo (%)",
+                "dig_trp": "Dig.Trip (%)", "dig_val": "Dig.Val (%)", "ca_total": "Cálcio (%)",
+                "p_npp": "P-NPP (%)", "sodium": "Sódio (%)", "chloride": "Cloreto (%)",
+            }
+
+            for _ef in _ea_cfg["fases"]:
+                _ef_lbl = _ea_cfg["labels_fase"][_ea_cfg["fases"].index(_ef)]
+                section(f"Fase: {_ef_lbl}", "requisitos nutricionais mínimos")
+                _ef_cols = st.columns(3)
+                for _ni, (_nk, _nl) in enumerate(_NUT_EDIT_LBL.items()):
+                    _nkey = f"ea_{_edit_anim}_{_ef}_{_nk}"
+                    _nval = _ea_cfg["req_base"].get(_ef, {}).get(_nk, 0.0)
+                    if _nkey not in st.session_state:
+                        st.session_state[_nkey] = float(_nval)
+                    _ef_cols[_ni % 3].number_input(
+                        _nl, min_value=0.0, max_value=20.0, step=0.001,
+                        format="%.3f", key=_nkey)
+
+            _save_col, _del_col, _ = st.columns([1, 1, 4])
+            with _save_col:
+                if st.button("💾 Salvar Alterações", type="primary",
+                             use_container_width=True, key="btn_save_anim"):
+                    for _ef in _ea_cfg["fases"]:
+                        for _nk in _NUT_EDIT_LBL:
+                            _nkey = f"ea_{_edit_anim}_{_ef}_{_nk}"
+                            if _nkey in st.session_state:
+                                st.session_state.animais_db[_edit_anim]["req_base"].setdefault(
+                                    _ef, {})[_nk] = float(st.session_state[_nkey])
+                    st.success(f"✓ Requisitos de {_edit_anim} salvos com sucesso!")
+
+            with _del_col:
+                if not _is_default:
+                    if st.button("🗑 Excluir Animal", use_container_width=True,
+                                 key="btn_del_anim"):
+                        del st.session_state.animais_db[_edit_anim]
+                        if st.session_state.get("animal_sel") == _edit_anim:
+                            st.session_state.animal_sel = list(
+                                st.session_state.animais_db.keys())[0]
+                        st.success(f"Animal '{_edit_anim}' removido.")
+                        st.rerun()
+                else:
+                    st.caption("Animais padrão não podem ser excluídos.")
+
+        # ── Adicionar novo animal ──────────────────────────────
+        with _aconf_tabs[1]:
+            section("Adicionar Novo Animal",
+                    "cria perfil completo com fases e requisitos nutricionais")
+            st.markdown(f"""
+            <div style="background:#ECFDF5;border:1px solid #6EE7B7;border-radius:10px;
+                        padding:10px 16px;margin-bottom:16px;font-family:{_FONT};
+                        font-size:0.78rem;color:#065F46;">
+              💡 O novo animal usa formulação LP para todas as fases.
+              Após criar, edite os requisitos nutricionais na aba <b>✏️ Editar Animal</b>.
+            </div>""", unsafe_allow_html=True)
+
+            _na1, _na2 = st.columns(2)
+            _new_nome   = _na1.text_input("Nome do animal", placeholder="Ex: Codorna Japonesa",
+                                           key="new_anim_nome")
+            _new_icone  = _na2.selectbox("Ícone", ["🐦","🐧","🦅","🦆","🦉","🦚","🦜","🐓",
+                                                    "🐟","🐄","🐖","🐑","🐐","🐇","🦊"],
+                                          key="new_anim_icone")
+            _na3, _na4  = st.columns(2)
+            _new_nfases = _na3.number_input("Número de fases", 2, 6, 3, 1, key="new_anim_nfases")
+            _clone_de   = _na4.selectbox("Clonar requisitos de",
+                                          list(st.session_state.animais_db.keys()),
+                                          key="new_anim_clone")
+
+            section("Definir Fases")
+            _new_fases_data = []
+            for _nfi in range(int(_new_nfases)):
+                _nc1, _nc2, _nc3, _nc4, _nc5 = st.columns([2, 2, 1, 1, 1])
+                _fid   = _nc1.text_input(f"ID fase {_nfi+1}", value=f"fase{_nfi+1}",
+                                          key=f"new_f_id_{_nfi}",
+                                          placeholder="sem espaços")
+                _flbl  = _nc2.text_input(f"Rótulo fase {_nfi+1}", value=f"Fase {_nfi+1}",
+                                          key=f"new_f_lbl_{_nfi}")
+                _fme   = _nc3.number_input(f"ME {_nfi+1}", 2400, 3600, 3000, 25,
+                                            key=f"new_f_me_{_nfi}")
+                _flys  = _nc4.number_input(f"Lys {_nfi+1}", 0.50, 2.00, 1.10, 0.01,
+                                            format="%.2f", key=f"new_f_lys_{_nfi}")
+                _fdias = _nc5.number_input(f"Dias {_nfi+1}", 1, 200, 21*(1+_nfi), 1,
+                                            key=f"new_f_dias_{_nfi}")
+                _new_fases_data.append({
+                    "id": str(_fid).replace(" ", "_").lower(),
+                    "label": str(_flbl),
+                    "me": int(_fme), "lys": float(_flys), "dias": int(_fdias),
+                })
+
+            if st.button("➕ Criar Animal", type="primary", use_container_width=False,
+                         key="btn_criar_animal"):
+                if not _new_nome.strip():
+                    st.error("Digite um nome para o animal.")
+                elif _new_nome.strip() in st.session_state.animais_db:
+                    st.error("Já existe um animal com este nome. Escolha outro nome.")
+                else:
+                    # Clone requirements from selected animal
+                    _clone_cfg = st.session_state.animais_db.get(_clone_de, {})
+                    _clone_fases = _clone_cfg.get("fases", [])
+                    _clone_req   = _clone_cfg.get("req_base", {})
+
+                    _new_fases_ids  = [d["id"]    for d in _new_fases_data]
+                    _new_fases_lbls = [d["label"] for d in _new_fases_data]
+                    _new_fases_short= [d["label"][:6] for d in _new_fases_data]
+                    _new_prog = {d["id"]: {"ame_n": d["me"], "dig_lys": d["lys"]}
+                                 for d in _new_fases_data}
+
+                    # Clone req_base: map clone phases to new phases by index
+                    _def_req = {"dig_met":0.45,"dig_cys":0.30,"dig_thr":0.70,
+                                "dig_trp":0.20,"dig_val":0.85,"ca_total":0.90,
+                                "p_npp":0.45,"sodium":0.18,"chloride":0.22}
+                    _new_req = {}
+                    for _ni2, _fid2 in enumerate(_new_fases_ids):
+                        _src_fase = (_clone_fases[_ni2]
+                                     if _ni2 < len(_clone_fases) else
+                                     (_clone_fases[-1] if _clone_fases else None))
+                        _new_req[_fid2] = copy.deepcopy(
+                            _clone_req.get(_src_fase, _def_req))
+
+                    _new_animal_key = f"{_new_icone} {_new_nome.strip()}"
+                    st.session_state.animais_db[_new_animal_key] = {
+                        "icone": _new_icone,
+                        "tipo":  "custom",
+                        "rsm_disponivel": False,
+                        "fases":       _new_fases_ids,
+                        "labels_fase": _new_fases_lbls,
+                        "short_fase":  _new_fases_short,
+                        "prog_padrao": _new_prog,
+                        "req_base":    _new_req,
+                    }
+                    st.success(f"✓ Animal '{_new_animal_key}' criado com sucesso! "
+                               f"Acesse ✏️ Editar Animal para ajustar os requisitos.")
+                    st.rerun()
+
+    # ═══════════════════════════════════════════════════════════
+    # SUB-TAB 3 · CENÁRIOS
+    # ═══════════════════════════════════════════════════════════
+    with _conf_tabs[2]:
+        _sc1, _sc2 = st.columns([1, 2])
+
+        with _sc1:
+            section("Salvar Cenário Atual")
+            _cen_nome_inp = st.text_input("Nome do cenário",
+                                           placeholder="Ex: Alta Lisina Verão 2025",
+                                           key="cen_nome_inp")
+            st.markdown(f"""
+            <div style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:10px;
+                        padding:10px 14px;font-family:{_FONT};font-size:0.72rem;
+                        color:#64748B;margin-bottom:10px;">
+              <b>Será salvo:</b><br>
+              • Animal: {animal_nome}<br>
+              • Programa: {len(programa)} fases<br>
+              • Preços ing.: {len([c for c in _CKGC if abs(float(st.session_state.get(f'cfg_p_{c}',_CKGC[c]))-_CKGC[c])>0.0001])} alterados
+            </div>""", unsafe_allow_html=True)
+
+            if st.button("💾 Salvar Cenário", type="primary",
+                         use_container_width=True, key="btn_salvar_cen"):
+                if not _cen_nome_inp.strip():
+                    st.error("Digite um nome para o cenário.")
+                else:
+                    _cen_ci_save = {c: float(st.session_state.get(f"cfg_p_{c}", _CKGC.get(c,0)))
+                                    for c in _CKGC
+                                    if abs(float(st.session_state.get(f"cfg_p_{c}", _CKGC.get(c,0)))
+                                           - _CKGC.get(c,0)) > 0.0001}
+                    st.session_state.cenarios_db[_cen_nome_inp.strip()] = {
+                        "animal":    animal_nome,
+                        "programa":  copy.deepcopy(programa),
+                        "custos_ing": _cen_ci_save,
+                        "salvo_em":  datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    }
+                    st.success(f"✓ Cenário '{_cen_nome_inp.strip()}' salvo!")
+
+            divider()
+            section("Exportar / Importar")
+            if st.session_state.cenarios_db:
+                _json_export = json.dumps(st.session_state.cenarios_db,
+                                          ensure_ascii=False, indent=2, default=str)
+                st.download_button(
+                    "⬇ Exportar Cenários (JSON)",
+                    data=_json_export.encode("utf-8"),
+                    file_name="genesis_cenarios.json",
+                    mime="application/json",
+                    use_container_width=True)
+            else:
+                st.caption("Nenhum cenário salvo para exportar.")
+
+            _json_upload = st.file_uploader("Importar Cenários (.json)",
+                                             type=["json"], key="cen_upload")
+            if _json_upload is not None:
+                try:
+                    _imp_data = json.loads(_json_upload.read().decode("utf-8"))
+                    if st.button("📥 Carregar Cenários Importados",
+                                 key="btn_import_cen"):
+                        st.session_state.cenarios_db.update(_imp_data)
+                        st.success(f"✓ {len(_imp_data)} cenários importados!")
+                        st.rerun()
+                except Exception as _je:
+                    st.error(f"Erro ao ler JSON: {_je}")
+
+        with _sc2:
+            section("Cenários Salvos")
+            if not st.session_state.cenarios_db:
+                st.markdown(f"""
+                <div style="text-align:center;padding:50px 20px;border:1px solid #E2E8F0;
+                            border-radius:14px;background:#FFFFFF;font-family:{_FONT};">
+                  <div style="font-size:2.5rem;opacity:0.15;">💾</div>
+                  <div style="font-size:0.82rem;color:#94A3B8;margin-top:12px;">
+                    Nenhum cenário salvo ainda.<br>
+                    Use o painel ao lado para salvar o estado atual.
+                  </div>
+                </div>""", unsafe_allow_html=True)
+            else:
+                for _cen_k, _cen_v in list(st.session_state.cenarios_db.items()):
+                    _cen_prog = _cen_v.get("programa", {})
+                    _cen_prog_str = " · ".join(
+                        f"{f}: ME{v.get('ame_n',0):.0f}/Lys{v.get('dig_lys',0):.3f}"
+                        for f, v in _cen_prog.items())
+                    _n_precos_alt = len(_cen_v.get("custos_ing", {}))
+                    st.markdown(f"""
+                    <div style="background:#FFFFFF;border:1px solid #E2E8F0;border-radius:12px;
+                                padding:14px 16px;margin-bottom:8px;font-family:{_FONT};">
+                      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                        <div>
+                          <div style="font-size:0.85rem;font-weight:700;color:#1E293B;">
+                            💾 {_cen_k}</div>
+                          <div style="font-size:0.68rem;color:#64748B;margin-top:3px;">
+                            {_cen_v.get('animal','—')} · Salvo em {_cen_v.get('salvo_em','—')}</div>
+                          <div style="font-size:0.62rem;color:#94A3B8;margin-top:3px;
+                                      font-family:monospace;">
+                            {_cen_prog_str}</div>
+                          <div style="font-size:0.62rem;color:#94A3B8;margin-top:2px;">
+                            {_n_precos_alt} preços de ingredientes alterados</div>
+                        </div>
+                      </div>
+                    </div>""", unsafe_allow_html=True)
+                    _btn_col1, _btn_col2, _btn_col3 = st.columns([1, 1, 4])
+                    with _btn_col1:
+                        if st.button("▶ Carregar", key=f"load_cen_{_cen_k}",
+                                     use_container_width=True):
+                            # Load animal
+                            if _cen_v.get("animal") in st.session_state.animais_db:
+                                st.session_state.animal_sel = _cen_v["animal"]
+                                st.session_state["_prev_anim_name"] = None  # force reset
+                            # Load nutritional program
+                            for _lf, _lv in _cen_prog.items():
+                                st.session_state[f"me_{_lf}"] = _lv.get("ame_n", 3000)
+                                st.session_state[f"ly_{_lf}"] = _lv.get("dig_lys", 1.10)
+                            # Load ingredient prices
+                            for _lc, _lp in _cen_v.get("custos_ing", {}).items():
+                                st.session_state[f"cfg_p_{_lc}"] = float(_lp)
+                            st.success(f"✓ Cenário '{_cen_k}' carregado!")
+                            st.rerun()
+                    with _btn_col2:
+                        if st.button("🗑 Excluir", key=f"del_cen_{_cen_k}",
+                                     use_container_width=True):
+                            del st.session_state.cenarios_db[_cen_k]
+                            st.success(f"Cenário '{_cen_k}' excluído.")
+                            st.rerun()
